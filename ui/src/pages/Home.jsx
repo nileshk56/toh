@@ -4,35 +4,7 @@ import Header from "../components/Header.jsx";
 
 const initialTags = [];
 
-const leaderboards = [
-  {
-    id: 1,
-    title: "Top JavaScript Experts",
-    entries: [
-      "🥇 John Doe - 120 Points",
-      "🥈 Jane Smith - 110 Points",
-      "🥉 Alex Johnson - 105 Points"
-    ]
-  },
-  {
-    id: 2,
-    title: "Frontend Rising Stars",
-    entries: [
-      "🥇 Priya Singh - 98 Points",
-      "🥈 Liam Chen - 92 Points",
-      "🥉 Maria Costa - 87 Points"
-    ]
-  },
-  {
-    id: 3,
-    title: "API Builders",
-    entries: [
-      "🥇 Sara Ali - 89 Points",
-      "🥈 Noah Brooks - 83 Points",
-      "🥉 Leo Park - 80 Points"
-    ]
-  }
-];
+const leaderboards = [];
 
 const Home = () => {
   const { auth } = useAuth();
@@ -50,6 +22,9 @@ const Home = () => {
   });
   const [tagPageToken, setTagPageToken] = useState(null);
   const [tagHasMore, setTagHasMore] = useState(true);
+  const [leaderboardTag, setLeaderboardTag] = useState("intelligent");
+  const [leaderboard, setLeaderboard] = useState({ tag: "", leaders: [] });
+  const [leaderboardStatus, setLeaderboardStatus] = useState({ loading: false, error: "" });
 
   const userName = useMemo(() => {
     if (auth.user?.firstname) return `${auth.user.firstname} ${auth.user.lastname || ""}`.trim();
@@ -60,11 +35,9 @@ const Home = () => {
   const fetchTags = async ({ append = false, nextToken = null } = {}) => {
     if (!auth.user?.uid || !auth.token) return;
     try {
-      const tokenParam = nextToken
-        ? `&lastKey=${encodeURIComponent(btoa(nextToken))}`
-        : "";
+      const tokenParam = nextToken ? `&lastKey=${encodeURIComponent(nextToken)}` : "";
       const response = await fetch(
-        `https://q003qm8w8d.execute-api.ap-south-1.amazonaws.com/tags/${auth.user.uid}?limit=2${tokenParam}`,
+        `http://localhost:5002/tags/${auth.user.uid}?entityType=USER&limit=2${tokenParam}`,
         {
           method: "GET",
           headers: {
@@ -91,7 +64,8 @@ const Home = () => {
         endorsers: tag.endorsers || [],
         description: tag.description || "New skill added by user.",
         endorsed: false,
-        showEndorsers: false
+        showEndorsers: false,
+        status: tag.status || "APPROVED"
       }));
 
       setTags((prev) => (append ? [...prev, ...mapped] : mapped));
@@ -108,11 +82,46 @@ const Home = () => {
   }, [auth.user?.uid, auth.token]);
 
   useEffect(() => {
+    const fetchLeaderboard = async () => {
+      if (!leaderboardTag || !auth.token) return;
+      setLeaderboardStatus({ loading: true, error: "" });
+      try {
+        const response = await fetch(
+          `http://localhost:5002/tags/${encodeURIComponent(leaderboardTag)}/leaderboard?type=USER`,
+          {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${auth.token}`,
+              "Content-Type": "application/json"
+            }
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error("Failed to load leaderboard.");
+        }
+
+        const data = await response.json();
+        setLeaderboard({ tag: data?.tag || leaderboardTag, leaders: data?.leaders || [] });
+        setLeaderboardStatus({ loading: false, error: "" });
+      } catch (error) {
+        setLeaderboardStatus({ loading: false, error: error.message || "Failed to load leaderboard." });
+      }
+    };
+
+    fetchLeaderboard();
+  }, [leaderboardTag, auth.token]);
+
+  const handleLeaderboardTagChange = (event) => {
+    setLeaderboardTag(event.target.value);
+  };
+
+  useEffect(() => {
     const fetchRecommendations = async () => {
       if (!auth.user?.uid || !auth.token) return;
       try {
         const response = await fetch(
-          `https://95liowcoa4.execute-api.ap-south-1.amazonaws.com/recommendations/${auth.user.uid}`,
+          `http://localhost:5003/recommendations/${auth.user.uid}?entityType=USER`,
           {
             method: "GET",
             headers: {
@@ -140,12 +149,77 @@ const Home = () => {
     fetchRecommendations();
   }, [auth.user?.uid, auth.token]);
 
-  const handleEndorse = (id) => {
-    setTags((prev) =>
-      prev.map((tag) =>
-        tag.id === id ? { ...tag, endorsed: true, count: tag.count + 1 } : tag
-      )
-    );
+  const handleEndorse = async (tagTitle, tagId) => {
+    if (!auth.token || !auth.user?.uid) return;
+    setTagStatus({ loading: true, error: "", success: "" });
+    try {
+      const response = await fetch("http://localhost:5002/tags/endorse", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${auth.token}`
+        },
+        body: JSON.stringify({
+          entityId: auth.user?.uid,
+          tag: tagTitle
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to endorse tag.");
+      }
+
+      const data = await response.json().catch(() => null);
+      setTags((prev) =>
+        prev.map((tag) =>
+          tag.id === tagId
+            ? { ...tag, endorsed: true, count: data?.newCount ?? tag.count + 1 }
+            : tag
+        )
+      );
+      setTagStatus({ loading: false, error: "", success: "" });
+    } catch (error) {
+      setTagStatus({ loading: false, error: error.message || "Failed to endorse tag.", success: "" });
+    }
+  };
+
+  const handleTagDecision = async (tagTitle, action) => {
+    if (!auth.token || !auth.user?.uid) return;
+    setTagStatus({ loading: true, error: "", success: "" });
+    try {
+      const endpoint =
+        action === "APPROVED"
+          ? "http://localhost:5002/tags/accept"
+          : "http://localhost:5002/tags/reject";
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${auth.token}`
+        },
+        body: JSON.stringify({
+          entityId: auth.user?.uid,
+          tag: tagTitle
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to update tag status.");
+      }
+
+      setTags((prev) =>
+        prev.map((tag) =>
+          tag.title === tagTitle ? { ...tag, status: action } : tag
+        )
+      );
+      setTagStatus({ loading: false, error: "", success: "Tag updated." });
+    } catch (error) {
+      setTagStatus({
+        loading: false,
+        error: error.message || "Failed to update tag status.",
+        success: ""
+      });
+    }
   };
 
   const handleAddTagChange = (event) => {
@@ -166,7 +240,7 @@ const Home = () => {
     setTagStatus({ loading: true, error: "", success: "" });
     try {
       const response = await fetch(
-        "https://q003qm8w8d.execute-api.ap-south-1.amazonaws.com/tags/add",
+        "http://localhost:5002/tags/add",
         {
           method: "POST",
           headers: {
@@ -174,7 +248,8 @@ const Home = () => {
             Authorization: `Bearer ${auth.token}`
           },
           body: JSON.stringify({
-            userId: auth.user?.uid,
+            entityId: auth.user?.uid,
+            entityType: "USER",
             tag
           })
         }
@@ -184,8 +259,8 @@ const Home = () => {
         throw new Error("Failed to add tag.");
       }
 
-      const data = await response.json().catch(() => null);
-      const newTagTitle = data?.tag || data?.name || tag;
+      await response.json().catch(() => null);
+      const newTagTitle = tag;
       const newTag = {
         id: data?.id || data?.tagId || `tag-${Date.now()}`,
         title: newTagTitle,
@@ -212,10 +287,17 @@ const Home = () => {
       });
       return;
     }
+    const confirmMsg =
+      action === "APPROVED"
+        ? "Approve this recommendation?"
+        : "Reject this recommendation?";
+    if (!window.confirm(confirmMsg)) {
+      return;
+    }
     setRecommendationStatus({ loading: true, error: "", success: "" });
     try {
       const response = await fetch(
-        "https://95liowcoa4.execute-api.ap-south-1.amazonaws.com/recommendations/",
+        "http://localhost:5003/recommendations/",
         {
           method: "PUT",
           headers: {
@@ -223,6 +305,8 @@ const Home = () => {
             Authorization: `Bearer ${auth.token}`
           },
           body: JSON.stringify({
+            entityId: auth.user?.uid,
+            entityType: "USER",
             fromUserId,
             action
           })
@@ -250,12 +334,58 @@ const Home = () => {
     }
   };
 
+  const handleDeleteRecommendation = async (fromUserId) => {
+    if (!fromUserId) {
+      setRecommendationStatus({
+        loading: false,
+        error: "Recommendation user id missing.",
+        success: ""
+      });
+      return;
+    }
+    if (!window.confirm("Delete this recommendation?")) {
+      return;
+    }
+    setRecommendationStatus({ loading: true, error: "", success: "" });
+    try {
+      const response = await fetch("http://localhost:5003/recommendations", {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${auth.token}`
+        },
+        body: JSON.stringify({
+          entityId: auth.user?.uid,
+          entityType: "USER",
+          fromUserId
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to delete recommendation.");
+      }
+
+      setRecommendations((prev) =>
+        prev.filter(
+          (item) => (item.fromUserId || item.userId || item.uid) !== fromUserId
+        )
+      );
+      setRecommendationStatus({ loading: false, error: "", success: "Recommendation deleted." });
+    } catch (error) {
+      setRecommendationStatus({
+        loading: false,
+        error: error.message || "Failed to delete recommendation.",
+        success: ""
+      });
+    }
+  };
+
   const handleToggleEndorsers = async (tagTitle, tagId) => {
     setEndorsersStatus({ loadingTag: tagId, error: "" });
     try {
       if (!auth.token || !auth.user?.uid) return;
       const response = await fetch(
-        `https://q003qm8w8d.execute-api.ap-south-1.amazonaws.com/tags/${auth.user.uid}/${encodeURIComponent(
+        `http://localhost:5002/tags/${auth.user.uid}/${encodeURIComponent(
           tagTitle
         )}/endorsers`,
         {
@@ -297,7 +427,10 @@ const Home = () => {
           <div className="col-12 col-lg-8">
             <div className="profile-card text-center">
               <img
-                src="https://static.vecteezy.com/system/resources/previews/002/002/403/non_2x/man-with-beard-avatar-character-isolated-icon-free-vector.jpg"
+                src={
+                  auth.user?.profilePicUrl ||
+                  "https://static.vecteezy.com/system/resources/previews/002/002/403/non_2x/man-with-beard-avatar-character-isolated-icon-free-vector.jpg"
+                }
                 width="140"
                 className="rounded-circle"
                 alt="User"
@@ -389,26 +522,53 @@ const Home = () => {
                           <i className="fa fa-code"></i> <strong>{tag.title}</strong> ({tag.count})
                         </h6>
                         <div className="d-flex flex-wrap gap-2">
-                          <button
-                            className="btn btn-sm btn-primary"
-                            onClick={() => handleEndorse(tag.id)}
-                            disabled={tag.endorsed}
-                          >
-                            <i className={tag.endorsed ? "fa fa-check" : "fa fa-thumbs-up"}></i>
-                            {tag.endorsed ? " Endorsed" : " Endorse"}
-                          </button>
-                          <button
-                            className="btn btn-sm btn-outline-secondary"
-                            type="button"
-                            disabled={endorsersStatus.loadingTag === tag.id}
-                            onClick={() => handleToggleEndorsers(tag.title, tag.id)}
-                          >
-                            <i className="fa fa-users me-1"></i>
-                            {endorsersStatus.loadingTag === tag.id
-                              ? "Loading..."
-                              : "View Endorsers"}
-                          </button>
+                          {tag.status !== "PENDING" && (
+                            <button
+                              className="btn btn-sm btn-primary"
+                              onClick={() => handleEndorse(tag.title, tag.id)}
+                              disabled={tag.endorsed || tagStatus.loading}
+                            >
+                              <i className={tag.endorsed ? "fa fa-check" : "fa fa-thumbs-up"}></i>
+                              {tag.endorsed ? " Endorsed" : " Endorse"}
+                            </button>
+                          )}
+                          {tag.status === "PENDING" && (
+                            <>
+                              <button
+                                className="btn btn-sm btn-outline-success"
+                                type="button"
+                                disabled={tagStatus.loading}
+                                onClick={() => handleTagDecision(tag.title, "APPROVED")}
+                              >
+                                <i className="fa-solid fa-check me-1"></i> Approve
+                              </button>
+                              <button
+                                className="btn btn-sm btn-outline-danger"
+                                type="button"
+                                disabled={tagStatus.loading}
+                                onClick={() => handleTagDecision(tag.title, "REJECTED")}
+                              >
+                                <i className="fa-solid fa-xmark me-1"></i> Reject
+                              </button>
+                            </>
+                          )}
+                          {tag.status !== "PENDING" && (
+                            <button
+                              className="btn btn-sm btn-outline-secondary"
+                              type="button"
+                              disabled={endorsersStatus.loadingTag === tag.id}
+                              onClick={() => handleToggleEndorsers(tag.title, tag.id)}
+                            >
+                              <i className="fa fa-users me-1"></i>
+                              {endorsersStatus.loadingTag === tag.id
+                                ? "Loading..."
+                                : "View Endorsers"}
+                            </button>
+                          )}
                         </div>
+                        {tag.status && tag.status !== "PENDING" && (
+                          <div className="small text-muted mt-2">Status: {tag.status}</div>
+                        )}
                         {endorsersByTag[tag.id]?.show && (
                           <div className="endorsement-list mt-2">
                             {endorsersByTag[tag.id].list.length === 0 && (
@@ -456,44 +616,53 @@ const Home = () => {
                     {recommendations.length === 0 && (
                       <div className="text-muted">No recommendations yet.</div>
                     )}
-                    {recommendations.map((item, index) => (
-                      <div className="tag-card" key={item.id || item.recommendationId || index}>
-                        <div className="d-flex justify-content-between align-items-start gap-2 flex-wrap">
-                          <p className="mb-0">{item.content || item.text || item.message}</p>
-                          <div className="d-flex gap-2">
-                            <button
-                              type="button"
-                              className="btn btn-sm btn-outline-success"
-                              disabled={recommendationStatus.loading}
-                              onClick={() =>
-                                handleUpdateRecommendation(
-                                  item.fromUserId || item.userId || item.uid,
-                                  "APPROVED"
-                                )
-                              }
-                            >
-                              <i className="fa-solid fa-check me-1"></i> Approve
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-sm btn-outline-danger"
-                              disabled={recommendationStatus.loading}
-                              onClick={() =>
-                                handleUpdateRecommendation(
-                                  item.fromUserId || item.userId || item.uid,
-                                  "REJECTED"
-                                )
-                              }
-                            >
-                              <i className="fa-solid fa-xmark me-1"></i> Reject
-                            </button>
+                    {recommendations.map((item, index) => {
+                      const status = item.status || "";
+                      const isApproved = status.startsWith("APPROVED#");
+                      const isRejected = status.startsWith("REJECTED#");
+                      const fromUserId = item.fromUserId || item.userId || item.uid;
+                      return (
+                        <div className="tag-card" key={item.id || item.recommendationId || index}>
+                          <div className="d-flex justify-content-between align-items-start gap-2 flex-wrap">
+                            <p className="mb-0">{item.content || item.text || item.message}</p>
+                            <div className="d-flex gap-2">
+                              {isApproved || isRejected ? (
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-outline-danger"
+                                  disabled={recommendationStatus.loading}
+                                  onClick={() => handleDeleteRecommendation(fromUserId)}
+                                >
+                                  <i className="fa-solid fa-trash me-1"></i> Delete
+                                </button>
+                              ) : (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-outline-success"
+                                    disabled={recommendationStatus.loading}
+                                    onClick={() => handleUpdateRecommendation(fromUserId, "APPROVED")}
+                                  >
+                                    <i className="fa-solid fa-check me-1"></i> Approve
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-outline-danger"
+                                    disabled={recommendationStatus.loading}
+                                    onClick={() => handleUpdateRecommendation(fromUserId, "REJECTED")}
+                                  >
+                                    <i className="fa-solid fa-xmark me-1"></i> Reject
+                                  </button>
+                                </>
+                              )}
+                            </div>
                           </div>
+                          {item.status && (
+                            <div className="small text-muted mt-2">Status: {item.status}</div>
+                          )}
                         </div>
-                        {item.status && (
-                          <div className="small text-muted mt-2">Status: {item.status}</div>
-                        )}
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -502,23 +671,43 @@ const Home = () => {
 
           <div className="col-12 col-lg-4">
             <div className="d-flex flex-column gap-3">
-              {leaderboards.map((board) => (
-                <div className="leaderboard-card" key={board.id}>
-                  <h5>
-                    <i className="fa fa-trophy"></i> Leaderboard
-                  </h5>
+              <div className="leaderboard-card">
+                <h5>
+                  <i className="fa fa-trophy"></i> Leaderboard
+                </h5>
+                <div className="mb-2">
+                  <label className="form-label small text-muted">Tag</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={leaderboardTag}
+                    onChange={handleLeaderboardTagChange}
+                    placeholder="e.g. intelligent"
+                  />
+                </div>
+                {leaderboardStatus.error && (
+                  <div className="small text-danger mb-2">{leaderboardStatus.error}</div>
+                )}
+                {leaderboardStatus.loading && (
+                  <div className="small text-muted mb-2">Loading leaderboard...</div>
+                )}
+                {!leaderboardStatus.loading && (
                   <div>
                     <h6>
-                      <i className="fa fa-code"></i> {board.title}
+                      <i className="fa fa-code"></i> Top {leaderboard.tag || leaderboardTag}
                     </h6>
-                    {board.entries.map((entry) => (
-                      <p className="mb-1" key={entry}>
-                        {entry}
+                    {leaderboard.leaders.length === 0 && (
+                      <div className="text-muted">No leaders yet.</div>
+                    )}
+                    {leaderboard.leaders.map((leader, index) => (
+                      <p className="mb-1" key={`${leader.entityId || leader.userId}-${index}`}>
+                        {index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : "•"}{" "}
+                        {leader.entityId || leader.userId} - {leader.count}
                       </p>
                     ))}
                   </div>
-                </div>
-              ))}
+                )}
+              </div>
             </div>
           </div>
         </div>

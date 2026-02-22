@@ -1,3 +1,10 @@
+**/node_modules/
+**/local.env
+**/dist/
+**/build/
+.DS_Store
+npm-debug.log*
+
 # Logs
 **/logs
 **/*.log
@@ -56,9 +63,7 @@
 **/.yarn-integrity
 
 # dotenv environment variable files
-**/.env
-**/.env.*
-!**/.env.example
+**/local.env
 
 # Parcel cache
 **/.cache

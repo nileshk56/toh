@@ -33,7 +33,7 @@ const SearchUsers = () => {
       setStatus({ loading: true, error: "" });
       try {
         const response = await fetch(
-          `https://nyysc5yonb.execute-api.ap-south-1.amazonaws.com/users/search?firstName=${encodeURIComponent(
+          `http://localhost:5001/users/search?firstName=${encodeURIComponent(
             firstName
           )}&lastName=${encodeURIComponent(lastName)}`,
           {
@@ -108,8 +108,8 @@ const SearchUsers = () => {
                     {user.firstname} {user.lastname}
                   </button>
                   <span className="badge text-bg-light">
-                    <i className="fa-regular fa-envelope me-1"></i>
-                    {user.email}
+                    <i className="fa-solid fa-id-card me-1"></i>
+                    {user.uid}
                   </span>
                 </div>
               </li>

@@ -23,37 +23,37 @@ const UserPage = () => {
   });
   const [tagPageToken, setTagPageToken] = useState(null);
   const [tagHasMore, setTagHasMore] = useState(true);
+  const [tagForm, setTagForm] = useState({ tag: "" });
+  const [tagStatus, setTagStatus] = useState({ loading: false, error: "", success: "" });
 
   const fetchUserAndTags = async ({ append = false, nextToken = null } = {}) => {
     if (!uid || !auth.token) return;
     setStatus({ loading: true, error: "" });
     try {
-      const tokenParam = nextToken
-        ? `&lastKey=${encodeURIComponent(btoa(nextToken))}`
-        : "";
+      const tokenParam = nextToken ? `&lastKey=${encodeURIComponent(nextToken)}` : "";
       const [userRes, tagRes, endorsedRes, recommendationRes] = await Promise.all([
-        fetch(`https://nyysc5yonb.execute-api.ap-south-1.amazonaws.com/users/${uid}`, {
+        fetch(`http://localhost:5001/users/${uid}`, {
           method: "GET",
           headers: {
             Authorization: `Bearer ${auth.token}`,
             "Content-Type": "application/json"
           }
         }),
-        fetch(`https://nyysc5yonb.execute-api.ap-south-1.amazonaws.com/tags/${uid}?limit=2${tokenParam}`, {
+        fetch(`http://localhost:5002/tags/${uid}?entityType=USER&limit=2${tokenParam}`, {
           method: "GET",
           headers: {
             Authorization: `Bearer ${auth.token}`,
             "Content-Type": "application/json"
           }
         }),
-        fetch("https://q003qm8w8d.execute-api.ap-south-1.amazonaws.com/tags/endorsed-users", {
+        fetch("http://localhost:5002/tags/endorsed-users", {
           method: "GET",
           headers: {
             Authorization: `Bearer ${auth.token}`,
             "Content-Type": "application/json"
           }
         }),
-        fetch(`https://95liowcoa4.execute-api.ap-south-1.amazonaws.com/recommendations/${uid}`, {
+        fetch(`http://localhost:5003/recommendations/${uid}?entityType=USER`, {
           method: "GET",
           headers: {
             Authorization: `Bearer ${auth.token}`,
@@ -86,7 +86,7 @@ const UserPage = () => {
         : tagData?.tags?.items || tagData?.data || [];
       const endorsedSet = new Set(
         Array.isArray(endorsedData?.items)
-          ? endorsedData.items.map((item) => `${item.userId}:${item.tag}`.toLowerCase())
+          ? endorsedData.items.map((item) => `${item.entityId}:${item.tag}`.toLowerCase())
           : []
       );
       setEndorsedKeys(endorsedSet);
@@ -127,7 +127,7 @@ const UserPage = () => {
     setEndorseStatus({ loading: true, error: "" });
     try {
       const response = await fetch(
-        "https://q003qm8w8d.execute-api.ap-south-1.amazonaws.com/tags/endorse",
+        "http://localhost:5002/tags/endorse",
         {
           method: "POST",
           headers: {
@@ -135,7 +135,7 @@ const UserPage = () => {
             Authorization: `Bearer ${auth.token}`
           },
           body: JSON.stringify({
-            userId: uid,
+            entityId: uid,
             tag: tagTitle
           })
         }
@@ -145,9 +145,12 @@ const UserPage = () => {
         throw new Error("Failed to endorse tag.");
       }
 
+      const data = await response.json().catch(() => null);
       setTags((prev) =>
         prev.map((tag) =>
-          tag.id === tagId ? { ...tag, endorsed: true, count: tag.count + 1 } : tag
+          tag.id === tagId
+            ? { ...tag, endorsed: true, count: data?.newCount ?? tag.count + 1 }
+            : tag
         )
       );
       setEndorsedKeys((prev) => {
@@ -158,6 +161,55 @@ const UserPage = () => {
       setEndorseStatus({ loading: false, error: "" });
     } catch (error) {
       setEndorseStatus({ loading: false, error: error.message || "Failed to endorse tag." });
+    }
+  };
+
+  const handleAddTagChange = (event) => {
+    setTagForm({ tag: event.target.value });
+    if (tagStatus.error || tagStatus.success) {
+      setTagStatus({ loading: false, error: "", success: "" });
+    }
+  };
+
+  const handleAddTag = async (event) => {
+    event.preventDefault();
+    const tag = tagForm.tag.trim();
+    if (!tag) {
+      setTagStatus({ loading: false, error: "Tag is required.", success: "" });
+      return;
+    }
+    setTagStatus({ loading: true, error: "", success: "" });
+    try {
+      const response = await fetch("http://localhost:5002/tags/add", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${auth.token}`
+        },
+        body: JSON.stringify({
+          entityId: uid,
+          entityType: "USER",
+          tag
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to add tag.");
+      }
+
+      await response.json().catch(() => null);
+      const newTag = {
+        id: `tag-${Date.now()}`,
+        title: tag,
+        count: 0,
+        description: "New skill added by user.",
+        endorsed: false
+      };
+      setTags((prev) => [newTag, ...prev]);
+      setTagForm({ tag: "" });
+      setTagStatus({ loading: false, error: "", success: "Tag added successfully." });
+    } catch (error) {
+      setTagStatus({ loading: false, error: error.message || "Failed to add tag.", success: "" });
     }
   };
 
@@ -179,7 +231,7 @@ const UserPage = () => {
     setRecommendationStatus({ loading: true, error: "", success: "" });
     try {
       const response = await fetch(
-        "https://95liowcoa4.execute-api.ap-south-1.amazonaws.com/recommendations",
+        "http://localhost:5003/recommendations",
         {
           method: "POST",
           headers: {
@@ -187,7 +239,8 @@ const UserPage = () => {
             Authorization: `Bearer ${auth.token}`
           },
           body: JSON.stringify({
-            toUserId: uid,
+            entityId: uid,
+            entityType: "USER",
             content
           })
         }
@@ -220,10 +273,17 @@ const UserPage = () => {
       });
       return;
     }
+    const confirmMsg =
+      action === "APPROVED"
+        ? "Approve this recommendation?"
+        : "Reject this recommendation?";
+    if (!window.confirm(confirmMsg)) {
+      return;
+    }
     setRecommendationStatus({ loading: true, error: "", success: "" });
     try {
       const response = await fetch(
-        "https://95liowcoa4.execute-api.ap-south-1.amazonaws.com/recommendations/",
+        "http://localhost:5003/recommendations",
         {
           method: "PUT",
           headers: {
@@ -231,6 +291,8 @@ const UserPage = () => {
             Authorization: `Bearer ${auth.token}`
           },
           body: JSON.stringify({
+            entityId: uid,
+            entityType: "USER",
             fromUserId,
             action
           })
@@ -258,12 +320,58 @@ const UserPage = () => {
     }
   };
 
+  const handleDeleteRecommendation = async (fromUserId) => {
+    if (!fromUserId) {
+      setRecommendationStatus({
+        loading: false,
+        error: "Recommendation user id missing.",
+        success: ""
+      });
+      return;
+    }
+    if (!window.confirm("Delete this recommendation?")) {
+      return;
+    }
+    setRecommendationStatus({ loading: true, error: "", success: "" });
+    try {
+      const response = await fetch("http://localhost:5003/recommendations", {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${auth.token}`
+        },
+        body: JSON.stringify({
+          entityId: uid,
+          entityType: "USER",
+          fromUserId
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to delete recommendation.");
+      }
+
+      setRecommendations((prev) =>
+        prev.filter(
+          (item) => (item.fromUserId || item.userId || item.uid) !== fromUserId
+        )
+      );
+      setRecommendationStatus({ loading: false, error: "", success: "Recommendation deleted." });
+    } catch (error) {
+      setRecommendationStatus({
+        loading: false,
+        error: error.message || "Failed to delete recommendation.",
+        success: ""
+      });
+    }
+  };
+
   const handleToggleEndorsers = async (tagTitle, tagId) => {
     setEndorsersStatus({ loadingTag: tagId, error: "" });
     try {
       if (!auth.token || !uid) return;
       const response = await fetch(
-        `https://q003qm8w8d.execute-api.ap-south-1.amazonaws.com/tags/${uid}/${encodeURIComponent(
+        `http://localhost:5002/tags/${uid}/${encodeURIComponent(
           tagTitle
         )}/endorsers`,
         {
@@ -361,6 +469,34 @@ const UserPage = () => {
                       <h6 className="mb-3">
                         <i className="fa-solid fa-tags me-2"></i> Tags & Endorsements
                       </h6>
+                      <form className="mb-3" onSubmit={handleAddTag}>
+                        <div className="input-group">
+                          <span className="input-group-text bg-light">
+                            <i className="fa-solid fa-tag"></i>
+                          </span>
+                          <input
+                            type="text"
+                            className="form-control"
+                            placeholder="Add a tag..."
+                            value={tagForm.tag}
+                            onChange={handleAddTagChange}
+                          />
+                          <button
+                            className="btn btn-primary"
+                            type="submit"
+                            disabled={tagStatus.loading}
+                          >
+                            <i className="fa-solid fa-plus me-1"></i>
+                            {tagStatus.loading ? "Adding..." : "Add Tag"}
+                          </button>
+                        </div>
+                      </form>
+                      {tagStatus.error && (
+                        <div className="alert alert-danger py-2">{tagStatus.error}</div>
+                      )}
+                      {tagStatus.success && (
+                        <div className="alert alert-success py-2">{tagStatus.success}</div>
+                      )}
                       {endorseStatus.error && (
                         <div className="alert alert-danger py-2">{endorseStatus.error}</div>
                       )}
@@ -472,44 +608,53 @@ const UserPage = () => {
                         {recommendations.length === 0 && (
                           <div className="text-muted">No recommendations yet.</div>
                         )}
-                        {recommendations.map((item, index) => (
-                          <div className="tag-card" key={item.id || item.recommendationId || index}>
-                            <div className="d-flex justify-content-between align-items-start gap-2 flex-wrap">
-                              <p className="mb-0">{item.content || item.text || item.message}</p>
-                              <div className="d-flex gap-2">
-                                <button
-                                  type="button"
-                                  className="btn btn-sm btn-outline-success"
-                                  disabled={recommendationStatus.loading}
-                                  onClick={() =>
-                                    handleUpdateRecommendation(
-                                      item.fromUserId || item.userId || item.uid,
-                                      "APPROVED"
-                                    )
-                                  }
-                                >
-                                  <i className="fa-solid fa-check me-1"></i> Approve
-                                </button>
-                                <button
-                                  type="button"
-                                  className="btn btn-sm btn-outline-danger"
-                                  disabled={recommendationStatus.loading}
-                                  onClick={() =>
-                                    handleUpdateRecommendation(
-                                      item.fromUserId || item.userId || item.uid,
-                                      "REJECTED"
-                                    )
-                                  }
-                                >
-                                  <i className="fa-solid fa-xmark me-1"></i> Reject
-                                </button>
+                        {recommendations.map((item, index) => {
+                          const status = item.status || "";
+                          const isApproved = status.startsWith("APPROVED#");
+                          const isRejected = status.startsWith("REJECTED#");
+                          const fromUserId = item.fromUserId || item.userId || item.uid;
+                          return (
+                            <div className="tag-card" key={item.id || item.recommendationId || index}>
+                              <div className="d-flex justify-content-between align-items-start gap-2 flex-wrap">
+                                <p className="mb-0">{item.content || item.text || item.message}</p>
+                                <div className="d-flex gap-2">
+                                  {isApproved || isRejected ? (
+                                    <button
+                                      type="button"
+                                      className="btn btn-sm btn-outline-danger"
+                                      disabled={recommendationStatus.loading}
+                                      onClick={() => handleDeleteRecommendation(fromUserId)}
+                                    >
+                                      <i className="fa-solid fa-trash me-1"></i> Delete
+                                    </button>
+                                  ) : (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="btn btn-sm btn-outline-success"
+                                        disabled={recommendationStatus.loading}
+                                        onClick={() => handleUpdateRecommendation(fromUserId, "APPROVED")}
+                                      >
+                                        <i className="fa-solid fa-check me-1"></i> Approve
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="btn btn-sm btn-outline-danger"
+                                        disabled={recommendationStatus.loading}
+                                        onClick={() => handleUpdateRecommendation(fromUserId, "REJECTED")}
+                                      >
+                                        <i className="fa-solid fa-xmark me-1"></i> Reject
+                                      </button>
+                                    </>
+                                  )}
+                                </div>
                               </div>
+                              {item.status && (
+                                <div className="small text-muted mt-2">Status: {item.status}</div>
+                              )}
                             </div>
-                            {item.status && (
-                              <div className="small text-muted mt-2">Status: {item.status}</div>
-                            )}
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   </div>

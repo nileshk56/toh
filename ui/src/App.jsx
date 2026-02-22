@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import Login from "./pages/Login.jsx";
 import Home from "./pages/Home.jsx";
 import UserPage from "./pages/UserPage.jsx";
+import EditProfile from "./pages/EditProfile.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 
 const App = () => (
@@ -22,6 +23,14 @@ const App = () => (
       element={
         <ProtectedRoute>
           <UserPage />
+        </ProtectedRoute>
+      }
+    />
+    <Route
+      path="/profile/edit"
+      element={
+        <ProtectedRoute>
+          <EditProfile />
         </ProtectedRoute>
       }
     />

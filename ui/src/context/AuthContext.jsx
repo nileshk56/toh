@@ -18,13 +18,24 @@ export const AuthProvider = ({ children }) => {
     localStorage.setItem("toh_auth", JSON.stringify(next));
   };
 
+  const updateUser = (updates) => {
+    setAuth((prev) => {
+      const next = {
+        ...prev,
+        user: { ...(prev.user || {}), ...(updates || {}) }
+      };
+      localStorage.setItem("toh_auth", JSON.stringify(next));
+      return next;
+    });
+  };
+
   const logout = () => {
     const next = { isAuthenticated: false, user: null, token: null };
     setAuth(next);
     localStorage.setItem("toh_auth", JSON.stringify(next));
   };
 
-  const value = useMemo(() => ({ auth, login, logout }), [auth]);
+  const value = useMemo(() => ({ auth, login, logout, updateUser }), [auth]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

@@ -53,7 +53,7 @@ const Login = () => {
     setStatus({ loading: true, error: "" });
     try {
       const response = await fetch(
-        "https://nyysc5yonb.execute-api.ap-south-1.amazonaws.com/users/login",
+        "http://localhost:5001/users/login",
         {
           method: "POST",
           headers: {
@@ -99,7 +99,7 @@ const Login = () => {
     setSignupStatus({ loading: true, error: "", success: "" });
     try {
       const response = await fetch(
-        "https://nyysc5yonb.execute-api.ap-south-1.amazonaws.com/users/register",
+        "http://localhost:5001/users/register",
         {
           method: "POST",
           headers: {

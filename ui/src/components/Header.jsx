@@ -45,9 +45,9 @@ const Header = () => {
           </button>
           <ul className="dropdown-menu dropdown-menu-end">
             <li>
-              <button className="dropdown-item" type="button">
+              <Link className="dropdown-item" to="/profile/edit">
                 <i className="fa-regular fa-user me-2"></i>Profile
-              </button>
+              </Link>
             </li>
             <li>
               <button className="dropdown-item" type="button">
