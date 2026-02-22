@@ -1,4 +1,4 @@
-const { createUser, getUserByEmail, searchUsersByName, getUserByUid } = require('../services/usersService');
+const { createUser, getUserByEmail, searchUsersByName, getUserByUid, updateUserByUid } = require('../services/usersService');
 const bcrypt = require('bcryptjs');
 const { signToken } = require('../utils/jwt');
 
@@ -59,4 +59,29 @@ const getUserById = async (req, res) => {
     }
 };
 
-module.exports = { register, login, searchUsers, getUserById };
+const updateUser = async (req, res) => {
+    try {
+        const { id } = req.params;
+        if (req.user?.uid !== id) {
+            return res.status(403).json({ message: 'Forbidden' });
+        }
+
+        const allowed = ['firstname', 'lastname', 'gender', 'dob', 'profilePicUrl'];
+        const updates = {};
+        allowed.forEach((key) => {
+            if (req.body[key] !== undefined) updates[key] = req.body[key];
+        });
+
+        if (Object.keys(updates).length === 0) {
+            return res.status(400).json({ message: 'No valid fields to update' });
+        }
+
+        const user = await updateUserByUid(id, updates);
+        return res.json({ user });
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ message: err.message });
+    }
+};
+
+module.exports = { register, login, searchUsers, getUserById, updateUser };

@@ -1,0 +1,17 @@
+{
+  "name": "toh-services",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start:users": "PORT=5001 node users/server.js",
+    "start:tags": "PORT=5002 node tags/server.js",
+    "start:recommendations": "PORT=5003 node recommendations/server.js",
+    "start:entities": "PORT=5004 node entities/server.js",
+    "start:uploads": "PORT=5005 node uploads/server.js",
+    "start:competitions": "PORT=5006 node competitions/server.js",
+    "start": "concurrently -k -n users,tags,recommendations,entities,uploads,competitions -c cyan,magenta,green,yellow,blue,white \"npm run start:users\" \"npm run start:tags\" \"npm run start:recommendations\" \"npm run start:entities\" \"npm run start:uploads\" \"npm run start:competitions\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

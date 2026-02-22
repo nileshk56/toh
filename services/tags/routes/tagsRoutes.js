@@ -9,8 +9,8 @@ router.post('/endorse', authMiddleware, controller.endorse);
 router.post('/accept', authMiddleware, controller.accept);
 router.post('/reject', authMiddleware, controller.reject);
 router.post('/add', authMiddleware, controller.addTag);
-router.get('/:userId', authMiddleware, controller.getUserTags);
-router.get('/:userId/:tag/endorsers', authMiddleware, controller.getEndorsers);
+router.get('/:entityId', authMiddleware, controller.getUserTags);
+router.get('/:entityId/:tag/endorsers', authMiddleware, controller.getEndorsers);
 router.get('/:tag/leaderboard', authMiddleware, controller.getTagLeaders);
 
 module.exports = router;

@@ -1,5 +1,5 @@
 const dynamo = require('../db/dynamo');
-const { v4: uuidv4 } = require('uuid');
+const { nanoid } = require('nanoid');
 const bcrypt = require('bcryptjs');
 
 const TABLE = 'users';
@@ -7,7 +7,7 @@ const TABLE = 'users';
 // Create User
 const createUser = async ({ firstname, lastname, email, password, gender, dob }) => {
     const hashedPwd = await bcrypt.hash(password, 10);
-    const user = { uid: uuidv4(), firstname, lastname, email, password: hashedPwd, gender, dob };
+    const user = { uid: nanoid(13), firstname, lastname, email, password: hashedPwd, gender, dob };
     console.log('Creating user:', user);
     try {
         await dynamo.put({ TableName: TABLE, Item: user }).promise();
@@ -37,16 +37,28 @@ const getUserByUid = async (uid) => {
 };
 
 // Update User
-const updateUser = async (id, data) => {
-    const updates = Object.keys(data).map((k, i) => `${k} = :v${i}`).join(', ');
-    const values = Object.values(data).reduce((acc, v, i) => ({ ...acc, [`:v${i}`]: v }), {});
+const updateUserByUid = async (uid, data) => {
+    const updates = [];
+    const values = {};
+    const names = {};
+
+    Object.entries(data).forEach(([key, value], index) => {
+        const valueKey = `:v${index}`;
+        const nameKey = `#k${index}`;
+        names[nameKey] = key;
+        values[valueKey] = value;
+        updates.push(`${nameKey} = ${valueKey}`);
+    });
+
     await dynamo.update({
         TableName: TABLE,
-        Key: { id },
-        UpdateExpression: `set ${updates}`,
+        Key: { uid },
+        UpdateExpression: `set ${updates.join(', ')}`,
+        ExpressionAttributeNames: names,
         ExpressionAttributeValues: values
     }).promise();
-    return await getUserById(id);
+
+    return await getUserByUid(uid);
 };
 
 // Delete User
@@ -84,4 +96,4 @@ const searchUsersByName = async (firstName, lastNamePrefix) => {
     }
 };
 
-module.exports = { createUser, getUserByEmail, getUserByUid, updateUser, deleteUser, searchUsersByName };
+module.exports = { createUser, getUserByEmail, getUserByUid, updateUserByUid, deleteUser, searchUsersByName };

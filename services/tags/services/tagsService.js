@@ -4,11 +4,27 @@ const config = require('../config');
 // Helper to pad count for lexicographic sorting
 const padCount = (count, length = 10) => String(count).padStart(length, '0');
 
-exports.endorseTag = async (userId, tag, endorserId) => {
+const normalizeEntityType = (entityType) => {
+    if (!entityType) return 'USER';
+    return String(entityType).trim().toUpperCase();
+};
+
+const updateTagCountForTarget = async (entityType, entityId, delta) => {
+    const tableName = entityType === 'ENTITY' ? config.tables.entities : config.tables.users;
+    await dynamo.update({
+        TableName: tableName,
+        Key: entityType === 'ENTITY' ? { entityId } : { uid: entityId },
+        UpdateExpression: 'ADD tagCount :inc',
+        ExpressionAttributeValues: { ':inc': delta }
+    }).promise();
+};
+
+
+exports.endorseTag = async (entityId, tag, endorserId) => {
     // 1️⃣ Check tag exists and is active
     const tagRes = await dynamo.get({
         TableName: config.tables.tags,
-        Key: { userId, tag }
+        Key: { entityId, tag }
     }).promise();
 
     if (!tagRes.Item || tagRes.Item.status !== 'ACTIVE') {
@@ -16,19 +32,20 @@ exports.endorseTag = async (userId, tag, endorserId) => {
     }
 
     const tagEndorser = `${tag}#${endorserId}`;
+    const entityType = normalizeEntityType(tagRes.Item.entityType);
 
     // 2️⃣ Insert endorsement - prevent duplicates
     try {
         await dynamo.put({
             TableName: config.tables.endorsements,
             Item: {
-                userId,
+                entityId,
                 tagEndorser,
                 tag,
                 endorserId,
                 createdAt: Date.now()
             },
-            ConditionExpression: 'attribute_not_exists(userId) AND attribute_not_exists(tagEndorser)'
+            ConditionExpression: 'attribute_not_exists(entityId) AND attribute_not_exists(tagEndorser)'
         }).promise();
     } catch (err) {
         if (err.code === 'ConditionalCheckFailedException') {
@@ -40,7 +57,7 @@ exports.endorseTag = async (userId, tag, endorserId) => {
     // 3️⃣ Increment count in tags table
     const updatedTag = await dynamo.update({
         TableName: config.tables.tags,
-        Key: { userId, tag },
+        Key: { entityId, tag },
         UpdateExpression: 'ADD #count :inc',
         ExpressionAttributeNames: { '#count': 'count' },
         ExpressionAttributeValues: { ':inc': 1 },
@@ -50,8 +67,8 @@ exports.endorseTag = async (userId, tag, endorserId) => {
     const newCount = updatedTag.Attributes.count;
 
     // 4️⃣ Update tagLeaders table
-    const leaderPK = `TAG#${tag}`;
-    const newSK = `COUNT#${padCount(newCount)}#${userId}`;
+    const leaderPK = `TAG#${entityType}#${tag}`;
+    const newSK = `COUNT#${padCount(newCount)}#${entityId}`;
 
     // 4a. Query lowest count in leaderboard (top 100)
     const top100 = await dynamo.query({
@@ -66,7 +83,7 @@ exports.endorseTag = async (userId, tag, endorserId) => {
     const lowestCount = lowest ? lowest.count : 0;
 
     // 4b. Check if user already exists in leaderboard (old SK)
-    const oldSK = `COUNT#${padCount(newCount - 1)}#${userId}`;
+    const oldSK = `COUNT#${padCount(newCount - 1)}#${entityId}`;
     const existingItem = await dynamo.get({
         TableName: config.tables.tagLeaders,
         Key: { PK: leaderPK, SK: oldSK }
@@ -87,7 +104,8 @@ exports.endorseTag = async (userId, tag, endorserId) => {
             Item: {
                 PK: leaderPK,
                 SK: newSK,
-                userId,
+                entityId,
+                entityType,
                 count: newCount
             }
         }).promise();
@@ -104,12 +122,12 @@ exports.endorseTag = async (userId, tag, endorserId) => {
     return { message: 'Endorsement recorded', newCount };
 };
 
-exports.getEndorsers = async (userId, tag, lastKey = null) => {
+exports.getEndorsers = async (entityId, tag, lastKey = null) => {
     const params = {
         TableName: config.tables.endorsements,
-        KeyConditionExpression: 'userId = :uid AND begins_with(tagEndorser, :tag)',
+        KeyConditionExpression: 'entityId = :eid AND begins_with(tagEndorser, :tag)',
         ExpressionAttributeValues: {
-            ':uid': userId,
+            ':eid': entityId,
             ':tag': `${tag}#`
         },
         Limit: 25
@@ -127,10 +145,10 @@ exports.getEndorsers = async (userId, tag, lastKey = null) => {
     };
 };
 
-exports.acceptTag = async (userId, tag) => {
+exports.acceptTag = async (entityId, tag) => {
     const tagRes = await dynamo.get({
         TableName: config.tables.tags,
-        Key: { userId, tag }
+        Key: { entityId, tag }
     }).promise();
 
     if (!tagRes.Item || tagRes.Item.status !== 'PENDING') {
@@ -138,11 +156,12 @@ exports.acceptTag = async (userId, tag) => {
     }
 
     const actorId = tagRes.Item.createdBy;
+    const entityType = normalizeEntityType(tagRes.Item.entityType);
 
     // Set tag ACTIVE and count = 1
     await dynamo.update({
         TableName: config.tables.tags,
-        Key: { userId, tag },
+        Key: { entityId, tag },
         UpdateExpression: 'SET #status = :active, #count = :count',
         ExpressionAttributeNames: { '#status': 'status', '#count': 'count' },
         ExpressionAttributeValues: { ':active': 'ACTIVE', ':count': 1 }
@@ -153,32 +172,32 @@ exports.acceptTag = async (userId, tag) => {
     await dynamo.put({
         TableName: config.tables.endorsements,
         Item: {
-            userId,
+            entityId,
             tagEndorser,
             tag,
             endorserId: actorId,
             createdAt: Date.now()
         },
-        ConditionExpression: 'attribute_not_exists(userId) AND attribute_not_exists(tagEndorser)'
+        ConditionExpression: 'attribute_not_exists(entityId) AND attribute_not_exists(tagEndorser)'
     }).promise();
 
     return { message: 'Tag accepted and count set to 1' };
 };
 
-exports.rejectTag = async (userId, tag) => {
+exports.rejectTag = async (entityId, tag) => {
     await dynamo.delete({
         TableName: config.tables.tags,
-        Key: { userId, tag }
+        Key: { entityId, tag }
     }).promise();
 
     return { message: 'Tag rejected' };
 };
 
-exports.addTag = async (userId, tag, actorId) => {
-    console.log('Adding tag', { userId, tag, actorId });
+exports.addTag = async (entityId, tag, actorId, entityTypeInput) => {
+    const entityType = normalizeEntityType(entityTypeInput);
     const existing = await dynamo.get({
         TableName: config.tables.tags,
-        Key: { userId, tag }
+        Key: { entityId, tag }
     }).promise();
 
     if (existing.Item) {
@@ -186,14 +205,15 @@ exports.addTag = async (userId, tag, actorId) => {
     }
 
     // Self add
-    if (userId === actorId) {
+    if (entityId === actorId) {
         await dynamo.put({
             TableName: config.tables.tags,
             Item: {
-                userId,
+                entityId,
                 tag,
                 count: 1,
-                status: 'ACTIVE'
+                status: 'ACTIVE',
+                entityType
             }
         }).promise();
 
@@ -202,43 +222,47 @@ exports.addTag = async (userId, tag, actorId) => {
         await dynamo.put({
             TableName: config.tables.endorsements,
             Item: {
-                userId,
+                entityId,
                 tagEndorser,
                 tag,
                 endorserId: actorId,
                 createdAt: Date.now()
             },
-            ConditionExpression: 'attribute_not_exists(userId) AND attribute_not_exists(tagEndorser)'
+            ConditionExpression: 'attribute_not_exists(entityId) AND attribute_not_exists(tagEndorser)'
         }).promise();*/
+
+        await updateTagCountForTarget(entityType, entityId, 1);
 
         return { message: 'Tag added successfully' };
     } 
 
     console.log('Creating pending tag request', {
-            userId,
+            entityId,
             tag,
             count: 0,
             status: 'PENDING',
             createdBy: actorId
         });
 
-    // Other user adding tag → create pending
+    // Other entity adding tag → create pending
     await dynamo.put({
         TableName: config.tables.tags,
         Item: {
-            userId,
+            entityId,
             tag,
             count: 0,
             status: 'PENDING',
-            createdBy: actorId
+            createdBy: actorId,
+            entityType
         }
     }).promise();
 
     return { message: 'Tag request sent' };
 };
 
-exports.getTagLeaders = async (tag) => {
-    const leaderPK = `TAG#${tag}`;
+exports.getTagLeaders = async (tag, entityTypeInput) => {
+    const entityType = normalizeEntityType(entityTypeInput);
+    const leaderPK = `TAG#${entityType}#${tag}`;
 
     const res = await dynamo.query({
         TableName: config.tables.tagLeaders,
@@ -248,16 +272,16 @@ exports.getTagLeaders = async (tag) => {
         Limit: 100
     }).promise();
 
-    return res.Items.map(i => ({ userId: i.userId, count: i.count }));
+    return res.Items.map(i => ({ entityId: i.entityId, count: i.count }));
 };
 
-exports.getTagsByUser = async (userId, options = {}) => {
-    const { status, limit, lastKey } = options;
+exports.getTagsByEntity = async (entityId, options = {}) => {
+    const { status, limit, lastKey, entityType } = options;
 
     const params = {
         TableName: config.tables.tags,
-        KeyConditionExpression: 'userId = :uid',
-        ExpressionAttributeValues: { ':uid': userId },
+        KeyConditionExpression: 'entityId = :eid',
+        ExpressionAttributeValues: { ':eid': entityId },
         Limit: limit, // optional
         ExclusiveStartKey: lastKey // optional
     };
@@ -269,6 +293,10 @@ exports.getTagsByUser = async (userId, options = {}) => {
     // Apply status filter after query (if provided)
     if (status) {
         items = items.filter(item => item.status === status);
+    }
+    if (entityType) {
+        const normalized = normalizeEntityType(entityType);
+        items = items.filter(item => normalizeEntityType(item.entityType) === normalized);
     }
 
     return {
@@ -296,7 +324,7 @@ exports.getEndorsedUsers = async (endorserId, lastKey = null) => {
 
     return {
         items: res.Items.map(item => ({
-            userId: item.userId,
+            entityId: item.entityId,
             tag: item.tag
         })),
         lastKey: res.LastEvaluatedKey || null

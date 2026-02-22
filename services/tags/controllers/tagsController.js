@@ -2,9 +2,9 @@ const service = require('../services/tagsService');
 
 exports.endorse = async (req, res) => {
     try {
-        const { userId, tag } = req.body;
+        const { entityId, tag } = req.body;
         endorserId =  req.user.uid; 
-        const data = await service.endorseTag(userId, tag, endorserId);
+        const data = await service.endorseTag(entityId, tag, endorserId);
 
         return res.status(200).json(data);
     } catch (e) {
@@ -15,7 +15,7 @@ exports.endorse = async (req, res) => {
 
 exports.getEndorsers = async (req, res) => {
     try {
-        const { userId, tag } = req.params;
+        const { entityId, tag } = req.params;
         let { pageToken } = req.query;
 
         // Decode pageToken if provided
@@ -24,7 +24,7 @@ exports.getEndorsers = async (req, res) => {
             lastKey = JSON.parse(Buffer.from(pageToken, 'base64').toString('utf-8'));
         }
 
-        const data = await service.getEndorsers(userId, tag, lastKey);
+        const data = await service.getEndorsers(entityId, tag, lastKey);
 
         // Encode lastKey for client if more pages exist
         let nextPageToken = null;
@@ -44,7 +44,7 @@ exports.getEndorsers = async (req, res) => {
 
 exports.accept = async (req, res) => {
     try {
-        await service.acceptTag(req.body.userId, req.body.tag);
+        await service.acceptTag(req.body.entityId, req.body.tag);
 
         return res.status(200).json({ message: 'Tag accepted' });
     } catch (e) {
@@ -55,7 +55,7 @@ exports.accept = async (req, res) => {
 
 exports.reject = async (req, res) => {
     try {
-        await service.rejectTag(req.body.userId, req.body.tag);
+        await service.rejectTag(req.body.entityId, req.body.tag);
 
         return res.status(200).json({ message: 'Tag rejected' });
     } catch (e) {
@@ -66,9 +66,9 @@ exports.reject = async (req, res) => {
 
 exports.addTag = async (req, res) => {
     try {
-        const { userId, tag } = req.body;
+        const { entityId, tag, entityType } = req.body;
         actorId = req.user.uid; 
-        const data = await service.addTag(userId, tag, actorId);
+        const data = await service.addTag(entityId, tag, actorId, entityType);
 
         return res.status(200).json(data);
     } catch (e) {
@@ -80,7 +80,8 @@ exports.addTag = async (req, res) => {
 exports.getTagLeaders = async (req, res) => {
     try {
         const { tag } = req.params;
-        const leaders = await service.getTagLeaders(tag);
+        const entityType = req.query.type;
+        const leaders = await service.getTagLeaders(tag, entityType);
         return res.status(200).json({ tag, leaders });
     } catch (e) {
         console.error(e);
@@ -90,16 +91,17 @@ exports.getTagLeaders = async (req, res) => {
 
 exports.getUserTags = async (req, res) => {
     try {
-        const { userId } = req.params;
+        const { entityId } = req.params;
         const loggedInUserId = req.user.uid;
+        const entityType = req.query.entityType;
 
-        if (!userId) {
-            return res.status(400).json({ error: 'userId is required' });
+        if (!entityId) {
+            return res.status(400).json({ error: 'entityId is required' });
         }
 
         // Filters
         const filters = {};
-        if (userId !== loggedInUserId) {
+        if (entityId !== loggedInUserId) {
             filters.status = 'ACTIVE'; // Only show active tags to others
         }
 
@@ -117,10 +119,11 @@ exports.getUserTags = async (req, res) => {
         }
 
         // Call service with filters and pagination
-        const { items, lastKey: nextKey } = await service.getTagsByUser(userId, {
+        const { items, lastKey: nextKey } = await service.getTagsByEntity(entityId, {
             status: filters.status,
             limit,
-            lastKey
+            lastKey,
+            entityType
         });
 
         return res.status(200).json({
